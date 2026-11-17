@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Launch Radar: pre-token protocols, priced by comparables</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="radar-mark" aria-hidden="true"><i></i></span>
+    <div>
+      <div class="brand-name">Launch Radar</div>
+      <div class="brand-sub">Pre-token protocols, priced by comparables</div>
+    </div>
+  </div>
+  <div class="top-meta">
+    <span>Snapshot <b id="meta-date">—</b></span>
+    <span>Model <b id="meta-model">—</b></span>
+    <span>Watchlist floor <b id="meta-floor">—</b></span>
+  </div>
+</header>
+<main class="shell">
+  <section class="stats" id="stats" aria-label="Coverage"></section>
+
+  <section class="method" aria-labelledby="method-title">
+    <div class="method-head">
+      <h2 id="method-title">How the radar prices a launch</h2>
+      <span class="method-note">One function scores every row. No protocol name is special-cased.</span>
+    </div>
+    <div class="formula">implied&nbsp;=&nbsp;TVL&nbsp;×&nbsp;peer&nbsp;multiple&nbsp;×&nbsp;growth&nbsp;×&nbsp;maturity&nbsp;×&nbsp;chains</div>
+    <div class="method-grid">
+      <div>
+        <h3>Comparables</h3>
+        <p>The peer multiple is the median market-cap-to-TVL ratio of the token-trading protocols in the same category. A category needs at least 3 peers to price itself; thinner categories fall back to the global median over all peers. The multiple is clamped to 0.01–2. Peers are token-trading protocols outside the excluded categories.</p>
+      </div>
+      <div>
+        <h3>Corrections</h3>
+        <p>Growth is the seven-day TVL change, clamped to −50%…+100% and half-weighted. Maturity rises with the log of the days since listing (unknown age counts as 365 days), from 0.7 to 1.0. Each chain beyond the first adds 5%, capped at four extra chains. Every input is a figure the snapshot carries.</p>
+      </div>
+      <div>
+        <h3>Scope</h3>
+        <p>The board ranks every launch candidate: a protocol that records no token and is not a wrapped, staked or bridged product. The snapshot's watchlist is the floor and is covered in full; the rows below the floor are the early radar. Implied value is a model, not a price, and no token is promised.</p>
+      </div>
+    </div>
+    <div class="method-figures" id="method-figures"></div>
+  </section>
+
+  <section class="controls" aria-label="Filter the board">
+    <div class="field grow">
+      <label for="q">Search</label>
+      <input id="q" type="search" placeholder="Name, slug, category or chain" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="category">Category</label>
+      <select id="category"></select>
+    </div>
+    <div class="field">
+      <label for="chain">Chain</label>
+      <select id="chain"></select>
+    </div>
+    <div class="field">
+      <label for="minTvl">Min TVL ($)</label>
+      <input id="minTvl" type="number" min="0" step="1000000" placeholder="0">
+    </div>
+    <div class="field">
+      <label for="minImplied">Min implied ($)</label>
+      <input id="minImplied" type="number" min="0" step="1000000" placeholder="0">
+    </div>
+    <button id="clear" type="button" class="btn">Clear filters</button>
+    <span class="count" id="count" role="status"></span>
+  </section>
+
+  <section class="panel" aria-label="Ranked board">
+    <div class="table-wrap">
+      <table>
+        <caption>Launch candidates, strongest implied value first. Select a row for its valuation breakdown and farm plan.</caption>
+        <thead>
+          <tr>
+            <th scope="col">Rank</th>
+            <th scope="col"><button type="button" data-sort="name">Protocol</button></th>
+            <th scope="col">Category</th>
+            <th scope="col">Chains</th>
+            <th scope="col"><button type="button" data-sort="tvl">TVL</button></th>
+            <th scope="col"><button type="button" data-sort="growth">7d</button></th>
+            <th scope="col"><button type="button" data-sort="age">Age</button></th>
+            <th scope="col"><button type="button" data-sort="multiple">Multiple</button></th>
+            <th scope="col"><button type="button" data-sort="implied">Implied value</button></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="empty" hidden>
+      <h2>No protocol matches that filter</h2>
+      <p>Clear the search or loosen the filters to see the board again.</p>
+      <button type="button" class="btn primary" id="clear2">Clear filters</button>
+    </div>
+    <div class="pager" id="pager"></div>
+  </section>
+
+  <footer class="foot">
+    <span id="foot-source"></span>
+    <span>Estimates, not prices. A protocol is listed as pre-token only because the snapshot records no token for it.</span>
+  </footer>
+</main>
+<dialog class="detail" id="detail" aria-labelledby="detail-title"></dialog>
+<script src="../data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
