@@ -17,6 +17,12 @@
 //
 // Every input is a figure the snapshot carries. No protocol name is ever special-cased: the same
 // functions score every row, and the dashboard shows each row's working in full.
+//
+// The model is also checked, leave-one-out, on the traded protocols: each one is priced with
+// itself removed from the peer set, and the median predicted-to-recorded ratio is reported as a
+// calibration figure. Multiples vary widely inside a category, so each row also carries the
+// interquartile range of its peer set: the dashboard shows the spread next to the multiple it
+// used, rather than a single number that pretends to be precise.
 
 /** One protocol entry: exactly the ten fields the sealed snapshot carries. */
 export interface SnapshotProtocol {
@@ -73,7 +79,7 @@ export const MODEL: ModelConstants = {
 };
 
 /** The model's version label, shown on the dashboard. */
-export const MODEL_VERSION = 'launch-radar-1';
+export const MODEL_VERSION = 'launch-radar-2';
 
 /** How many representative peers a row's breakdown names. */
 export const REPRESENTATIVE_PEERS = 5;
@@ -124,6 +130,8 @@ export interface Valuation {
   peer_set: 'category' | 'global';
   peer_category: string | null;
   peer_count: number;
+  peer_q1: number;
+  peer_q3: number;
   growth_pct: number;
   growth_multiplier: number;
   maturity_multiplier: number;
@@ -152,6 +160,12 @@ export interface BoardRow {
   farm_steps: string[];
 }
 
+/** The leave-one-out check: the median of the model's priced-to-recorded ratios over traded protocols. */
+export interface ModelValidation {
+  tested: number;
+  median_ratio: number;
+}
+
 /** Everything the dashboard renders. */
 export interface RadarData {
   as_of: string;
@@ -160,6 +174,7 @@ export interface RadarData {
   model: ModelConstants;
   model_version: string;
   peer_summary: { global_multiple: number; global_peer_count: number; categories_priced: number; categories_fallback: number };
+  validation: ModelValidation;
   watchlist_size: number;
   board_size: number;
   early_size: number;
@@ -192,6 +207,18 @@ function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = sorted.length >> 1;
   return sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+/** The first and third quartiles of a non-empty list, by linear interpolation on sorted values. */
+function quartiles(values: number[]): [number, number] {
+  const sorted = [...values].sort((a, b) => a - b);
+  const at = (q: number): number => {
+    const pos = (sorted.length - 1) * q;
+    const lo = Math.floor(pos);
+    const hi = Math.ceil(pos);
+    return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * (pos - lo);
+  };
+  return [at(0.25), at(0.75)];
 }
 
 /** Whether a protocol records no token at all. */
@@ -257,10 +284,12 @@ export function peerSetFor(p: SnapshotProtocol, data: PeerData): { set: PeerSet;
   return { set: data.global, kind: 'global' };
 }
 
-/** A protocol's implied value and its full working under the model. */
-export function impliedValueOf(p: SnapshotProtocol, asOf: string, data: PeerData, model: ModelConstants = MODEL): { implied: number; valuation: Valuation } {
-  const { set, kind } = peerSetFor(p, data);
-  const peerMultiple = Math.min(model.multiple_cap, Math.max(model.multiple_floor, set.multiple));
+/** The three corrections, shared by the board pricing and the backtest: one formula, both uses. */
+export function corrections(
+  p: SnapshotProtocol,
+  asOf: string,
+  model: ModelConstants = MODEL,
+): { growth_pct: number; growth_multiplier: number; maturity_multiplier: number; chain_multiplier: number; age_days: number | null } {
   const growthPct = Math.min(model.growth_cap, Math.max(model.growth_floor, p.change_7d ?? 0));
   const growthMultiplier = 1 + (growthPct / 100) * model.growth_weight;
   const age = ageDays(asOf, p.listed_at);
@@ -268,7 +297,16 @@ export function impliedValueOf(p: SnapshotProtocol, asOf: string, data: PeerData
   const maturityMultiplier =
     model.maturity_floor + model.maturity_range * (Math.log(1 + Math.min(Math.max(ageForModel, 0), model.maturity_days)) / Math.log(1 + model.maturity_days));
   const chainMultiplier = 1 + model.chain_step * Math.min(Math.max(p.chains.length - 1, 0), model.chain_max_extra);
-  const implied = Math.max(1, Math.min(100_000_000_000_000, Math.round(p.tvl_usd * peerMultiple * growthMultiplier * maturityMultiplier * chainMultiplier)));
+  return { growth_pct: growthPct, growth_multiplier: growthMultiplier, maturity_multiplier: maturityMultiplier, chain_multiplier: chainMultiplier, age_days: age };
+}
+
+/** A protocol's implied value and its full working under the model. */
+export function impliedValueOf(p: SnapshotProtocol, asOf: string, data: PeerData, model: ModelConstants = MODEL): { implied: number; valuation: Valuation } {
+  const { set, kind } = peerSetFor(p, data);
+  const peerMultiple = Math.min(model.multiple_cap, Math.max(model.multiple_floor, set.multiple));
+  const [peerQ1, peerQ3] = quartiles(set.peers.map((q) => q.multiple));
+  const c = corrections(p, asOf, model);
+  const implied = Math.max(1, Math.min(100_000_000_000_000, Math.round(p.tvl_usd * peerMultiple * c.growth_multiplier * c.maturity_multiplier * c.chain_multiplier)));
   return {
     implied,
     valuation: {
@@ -278,14 +316,64 @@ export function impliedValueOf(p: SnapshotProtocol, asOf: string, data: PeerData
       peer_set: kind,
       peer_category: kind === 'category' ? p.category : null,
       peer_count: set.count,
-      growth_pct: growthPct,
-      growth_multiplier: growthMultiplier,
-      maturity_multiplier: maturityMultiplier,
-      chain_multiplier: chainMultiplier,
-      age_days: age,
+      peer_q1: peerQ1,
+      peer_q3: peerQ3,
+      growth_pct: c.growth_pct,
+      growth_multiplier: c.growth_multiplier,
+      maturity_multiplier: c.maturity_multiplier,
+      chain_multiplier: c.chain_multiplier,
+      age_days: c.age_days,
       comparables: representativePeers(set),
     },
   };
+}
+
+/** A traded protocol's market cap as the model would price it, with itself removed from the peers. */
+function looPrediction(p: SnapshotProtocol, asOf: string, others: Peer[], model: ModelConstants): number {
+  const sameCategory = others.filter((q) => q.category !== null && q.category === p.category);
+  const set = sameCategory.length >= model.peer_min_count ? sameCategory : others;
+  const peerMultiple = Math.min(model.multiple_cap, Math.max(model.multiple_floor, median(set.map((q) => q.multiple))));
+  const c = corrections(p, asOf, model);
+  return Math.max(1, Math.round(p.tvl_usd * peerMultiple * c.growth_multiplier * c.maturity_multiplier * c.chain_multiplier));
+}
+
+/** One backtest row: a traded protocol, its market cap, and the model's leave-one-out price for it. */
+export interface BacktestRow {
+  slug: string;
+  name: string;
+  tvl_usd: number;
+  mcap_usd: number;
+  predicted_usd: number;
+  ratio: number;
+}
+
+/** Leave-one-out prices for every peer protocol: each priced without itself as a peer. */
+export function backtestPredictions(snapshot: Snapshot, model: ModelConstants = MODEL): BacktestRow[] {
+  const peers = peerProtocols(snapshot);
+  const bySlug = new Map(snapshot.protocols.map((p) => [p.slug, p]));
+  const rows: BacktestRow[] = [];
+  for (const peer of peers) {
+    const protocol = bySlug.get(peer.slug);
+    if (protocol === undefined || protocol.mcap_usd === null || protocol.mcap_usd <= 0) continue;
+    const others = peers.filter((q) => q.slug !== peer.slug);
+    const predicted = looPrediction(protocol, snapshot.as_of, others, model);
+    rows.push({ slug: peer.slug, name: peer.name, tvl_usd: protocol.tvl_usd, mcap_usd: protocol.mcap_usd, predicted_usd: predicted, ratio: predicted / protocol.mcap_usd });
+  }
+  rows.sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
+  return rows;
+}
+
+/**
+ * The leave-one-out check: every peer protocol priced with itself removed from the peer set,
+ * predicted market cap against the market cap the snapshot records. The median ratio says whether
+ * the model prices high or low on average; it is a calibration figure, not a promise that any
+ * single row lands close, and the dashboard says so next to the number.
+ */
+export function validateModel(snapshot: Snapshot, model: ModelConstants = MODEL): ModelValidation {
+  const ratios = backtestPredictions(snapshot, model)
+    .map((r) => r.ratio)
+    .sort((a, b) => a - b);
+  return { tested: ratios.length, median_ratio: round4(median(ratios)) };
 }
 
 /** A farm step: the action, what it costs, and how long it takes. */
@@ -342,33 +430,49 @@ function actionFor(p: SnapshotProtocol, capital: number, chain: string): string 
   return `Put $${capital} to work in ${name}'s main ${chain} product and keep the position open.`;
 }
 
+/** A gas estimate for a chain, from the chain's own name: mainnet costs dollars, rollups and alt-L1s cents. */
+function gasFor(chain: string): { per_tx: string; weekly: string } {
+  const c = chain.toLowerCase();
+  if (c.includes('ethereum')) return { per_tx: 'about $6 of gas', weekly: 'about $6 of gas a week' };
+  if (c.includes('solana')) return { per_tx: 'under $0.10 of gas', weekly: 'under $0.10 of gas a week' };
+  if (c.includes('arbitrum') || c.includes('optimism') || c.includes('base') || c.includes('zksync') || c.includes('linea') || c.includes('scroll') || c.includes('blast') || c.includes('mode'))
+    return { per_tx: 'under $1 of gas', weekly: 'under $1 of gas a week' };
+  if (c.includes('bsc') || c.includes('binance')) return { per_tx: 'under $0.50 of gas', weekly: 'under $0.50 of gas a week' };
+  if (c.includes('polygon') || c.includes('avalanche') || c.includes('fantom') || c.includes('gnosis'))
+    return { per_tx: 'under $1 of gas', weekly: 'under $1 of gas a week' };
+  return { per_tx: 'about $2 of gas', weekly: 'about $2 of gas a week' };
+}
+
 /**
  * A protocol's farm plan: six steps, each an action with a cost and a time. The plan is derived from
  * the protocol's own record (category, chains, TVL, age), never from a hand-written list of names.
+ * The position size follows the protocol's TVL tier and the gas figures follow its first chain, so
+ * every step states the dollars at stake and what the chain charges to move them.
  */
 export function farmPlanFor(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const chain = chainOf(p);
   const capital = capitalFor(p);
   const hold = holdDaysFor(age);
+  const gas = gasFor(chain);
   return [
     {
-      text: 'Set aside a wallet used only for this farm, funded with no more than the position size below, and store its recovery phrase offline.',
-      cost: 'under $3 of gas for the first transaction',
+      text: `Set aside a wallet used only for this farm and fund it with $${capital} plus gas money, then store its recovery phrase offline.`,
+      cost: `${gas.per_tx} for the first transaction`,
       time: '5 minutes',
     },
     {
       text: actionFor(p, capital, chain),
-      cost: `$${capital} of capital and about $${capital >= 150 ? 8 : 4} of gas`,
+      cost: `$${capital} of capital and ${gas.per_tx} on ${chain}`,
       time: '15 minutes to set up',
     },
     {
-      text: 'Return once a week and make one qualifying action, such as a deposit, a swap, a vote or a claim.',
-      cost: 'about $2 of gas a week',
+      text: 'Return once a week and make one qualifying action, such as a deposit, a swap, a vote or a claim, so the wallet stays active in every snapshot window.',
+      cost: gas.weekly,
       time: '10 minutes a week',
     },
     {
-      text: `Keep the position open for at least ${hold} days so the activity lands in more than one snapshot.`,
-      cost: `the $${capital} stays in the position`,
+      text: `Keep the $${capital} position open for at least ${hold} days so the activity lands in more than one snapshot.`,
+      cost: `the $${capital} stays locked in the position`,
       time: `${hold} days`,
     },
     {
@@ -377,7 +481,7 @@ export function farmPlanFor(p: SnapshotProtocol, age: number | null): FarmStep[]
       time: '10 minutes',
     },
     {
-      text: 'Log the wallet, the dates and every transaction, then unwind in reverse order when the farm ends.',
+      text: 'Log the wallet, the dates and every transaction hash, then unwind in reverse order when the farm ends and keep the log until any claim window closes.',
       cost: 'nothing but the log',
       time: '5 minutes',
     },
@@ -431,6 +535,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
       categories_priced: priced.size,
       categories_fallback: new Set(board.map((r) => r.category)).size - priced.size,
     },
+    validation: validateModel(snapshot, model),
     watchlist_size: snapshot.watchlist.length,
     board_size: board.length,
     early_size: board.filter((r) => !snapshot.watchlist.includes(r.slug)).length,

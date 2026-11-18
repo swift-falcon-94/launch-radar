@@ -16,7 +16,7 @@ In the grader, `main.ts` reads `/input/snapshot.json` and writes `/output`: `boa
 
 ## How it works
 
-Implied value is `TVL x peer multiple x growth x maturity x chains`. The peer multiple is the median market-cap-to-TVL ratio of the token-trading protocols in the same category (at least 3 peers, else the global median), clamped to 0.01–2. Growth is the seven-day TVL change, clamped and half-weighted; maturity rises with the log of the days since listing; each chain beyond the first adds 5%. Every input is a figure the snapshot carries, and no protocol name is special-cased.
+Implied value is `TVL x peer multiple x growth x maturity x chains`. The peer multiple is the median market-cap-to-TVL ratio of the token-trading protocols in the same category (at least 3 peers, else the global median), clamped to 0.01–2. Growth is the seven-day TVL change, clamped and half-weighted; maturity rises with the log of the days since listing; each chain beyond the first adds 5%. Every input is a figure the snapshot carries, and no protocol name is special-cased. The model is checked leave-one-out on the traded protocols (each priced without itself as a peer), and every row shows the interquartile range of its peer set next to the multiple it used, so the spread behind each estimate stays visible.
 
 ## Layout
 

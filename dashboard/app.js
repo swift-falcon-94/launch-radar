@@ -139,6 +139,13 @@
     figures.appendChild(el('span', { html: 'Categories priced on their own peers <b>' + DATA.peer_summary.categories_priced + '</b>' }));
     figures.appendChild(el('span', { html: 'Categories on the global fallback <b>' + DATA.peer_summary.categories_fallback + '</b>' }));
     figures.appendChild(el('span', { html: 'Multiple clamp <b>0.01–2</b> · growth clamp <b>−50%…+100%</b> · maturity <b>0.7–1.0</b>' }));
+    var v = DATA.validation;
+    var box = document.getElementById('validation');
+    if (v && box) {
+      box.textContent = '';
+      box.appendChild(el('span', { class: 'validation-label', text: 'Model check' }));
+      box.appendChild(el('span', { html: 'Leave-one-out on <b>' + v.tested + '</b> traded protocols: the median prediction is <b>' + v.median_ratio.toFixed(2) + '×</b> the recorded market cap. Multiples vary widely inside a category, so every row shows the range of its own peer set next to the multiple it used.' }));
+    }
   }
 
   function fillControls() {
@@ -246,7 +253,7 @@
     var factors = el('div', { class: 'factors' });
     [
       ['TVL', fmtFull(row.tvl_usd)],
-      ['Peer multiple', fmtMult(m.peer_multiple) + ' (' + (m.peer_set === 'category' ? m.peer_category + ', ' + m.peer_count + ' peers' : 'global fallback, ' + m.peer_count + ' peers') + ')'],
+      ['Peer multiple', fmtMult(m.peer_multiple) + ' · peers ' + fmtMult(m.peer_q1) + '–' + fmtMult(m.peer_q3) + ' (' + m.peer_count + ')'],
       ['Seven-day growth', fmtPct(row.change_7d) + ' → ' + m.growth_multiplier.toFixed(3) + '×'],
       ['Age with no token', fmtAge(row.age_days) + ' → ' + m.maturity_multiplier.toFixed(3) + '×'],
       ['Chains', String((row.chains || []).length) + ' → ' + m.chain_multiplier.toFixed(3) + '×'],
